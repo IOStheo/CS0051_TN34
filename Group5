@@ -1,0 +1,133 @@
+#include <iostream>
+#include <thread>
+#include <vector>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
+#include <chrono>
+#include <algorithm>
+
+// constants
+#define NUM_FLOORS 9
+#define ELEVATOR_CAPACITY 5
+
+// global variables
+std::mutex mtx;
+std::condition_variable cv;
+std::atomic<int> current_floor(0);
+std::atomic<int> passengers_inside(0);
+std::atomic<int> total_passengers(0);
+
+// global vector to simulate the passenger queue
+std::vector<std::tuple<int, int, int>> passengers; //tuple
+
+void ride(int passenger_id, int start_floor, int destination_floor) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    std::lock_guard<std::mutex> lock(mtx);
+    passengers.push_back(std::make_tuple(passenger_id, start_floor, destination_floor));
+    cv.notify_all();
+}
+
+void elevator_simulation() {
+    bool going_up = true;
+
+    while (true) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        std::lock_guard<std::mutex> lock(mtx);
+
+        if (going_up) {
+            if (current_floor < NUM_FLOORS) {
+                std::cout << "\nElevator is moving up to floor " << current_floor + 1 << "...\n";
+                current_floor++;
+            }
+
+            // entering the elevator
+            for (auto& p : passengers) {
+                if (std::get<1>(p) == current_floor && std::get<2>(p) > current_floor && passengers_inside < ELEVATOR_CAPACITY) {
+                    passengers_inside++;
+                    std::cout << "  Passenger " << std::get<0>(p) << " has entered at floor " << std::get<1>(p)
+                              << " (destination: floor " << std::get<2>(p) << ").\n";
+                }
+            }
+
+            // exiting at the current floor
+            std::vector<std::tuple<int, int, int>> remaining_passengers;
+            for (auto& p : passengers) {
+                if (std::get<2>(p) == current_floor) {
+                    std::cout << "  Passenger " << std::get<0>(p) << " has exited at floor " << current_floor << ".\n";
+                    passengers_inside--;
+                } else {
+                    remaining_passengers.push_back(p);
+                }
+            }
+            passengers = remaining_passengers;
+
+            // reaching the top floor
+            if (current_floor == NUM_FLOORS) {
+                std::cout << "\n========================================\n";
+                std::cout << "Elevator has reached top floor " << current_floor << ".\n";
+                std::cout << "========================================\n";
+                going_up = false;
+            }
+        } else {
+            if (current_floor > 0) {
+                std::cout << "\nElevator is moving down to floor " << current_floor - 1 << "...\n";
+                current_floor--;
+            }
+
+            // exiting the elevator on the way down
+            std::vector<std::tuple<int, int, int>> remaining_passengers;
+            for (auto& p : passengers) {
+                if (std::get<2>(p) == current_floor) {
+                    std::cout << "  Passenger " << std::get<0>(p) << " has exited at floor " << current_floor << ".\n";
+                    passengers_inside--;
+                } else {
+                    remaining_passengers.push_back(p);
+                }
+            }
+            passengers = remaining_passengers;
+
+            // elevator is empty and returns to the first floor
+            if (current_floor == 0 && passengers.empty()) {
+                std::cout << "\n===========================\n";
+                std::cout << "Elevator is empty and back at floor 1.\n";
+                std::cout << "\n===========================\n";
+                break;
+            }
+        }
+    }
+}
+
+int main() {
+    std::vector<std::thread> threads;
+    int num_passengers;
+
+    std::cout << "\n===========================\n";
+    std::cout << "FEU Tech Elevator Simulation\n";
+    std::cout << "===========================\n";
+    std::cout << "Number of passengers: ";
+    std::cin >> num_passengers;
+
+    std::cout << "\n========================================\n";
+    std::cout << "Start and destination floors for each passenger:\n";
+    std::cout << "========================================\n";
+
+    for (int i = 0; i < num_passengers; ++i) {
+        int start_floor, destination_floor;
+        std::cout << "Passenger " << i + 1 << ":\n";
+        std::cout << "  Start floor: ";
+        std::cin >> start_floor;
+        std::cout << "  Destination floor: ";
+        std::cin >> destination_floor;
+        threads.push_back(std::thread(ride, i + 1, start_floor, destination_floor));
+    }
+
+    std::thread elevator_thread(elevator_simulation);
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    elevator_thread.join();
+    return 0;
+}
